@@ -79,7 +79,16 @@ Parameter 'log_level' sets level for logging function.
             temp = temp.reshape(-1, 1)
         return temp
 
-    def ica(self, frame=10, samples=None, channels=None, **kwargs):
+    def _exec_func(self, name, args):
+        try:
+            _exec = getattr(self, name)
+            return _exec(**args)
+        except AttributeError:
+            self.log.error(
+                "Filter class does not have function: {0}".format(name))
+            sys.exit(1)
+
+    def ica(self, frame=10, data=None, samples=None, channels=None, **kwargs):
         """
 Function performs 'Independent Component Analysis' decomposition. It based on
 FastICA algorithm of 'scikit-learn' library. Use command 'ica_doc' for documentation.
@@ -88,7 +97,7 @@ FastICA algorithm of 'scikit-learn' library. Use command 'ica_doc' for documenta
 with chosen channels or int with specific channel.
         """
         model = FastICA(n_components=frame, **kwargs)
-        data = self._params_test(samples, channels)
+        data = self._params_test(samples, channels) if data is None else data
         if data.shape[0] % frame:
             new_shape = data.shape[0] // frame
             data = np.copy(data[:new_shape * frame, :])
@@ -104,7 +113,7 @@ therefore data samples will be clipped to {2}.
             to_res.append(a.reshape(-1, 1))
         return np.concatenate(to_res, axis=1)
 
-    def pca(self, frame=10, samples=None, channels=None, **kwargs):
+    def pca(self, frame=10, data=None, samples=None, channels=None, **kwargs):
         """
 Function performs 'Principal Component Analysis' decomposition. It based on
 PCA algorithm of 'scikit-learn' library. Use command 'pca_doc' for documentation.
@@ -114,7 +123,7 @@ PCA algorithm of 'scikit-learn' library. Use command 'pca_doc' for documentation
 with chosen channels or int with specific channel.
         """
         model = PCA(n_components=frame, **kwargs)
-        data = self._params_test(samples, channels)
+        data = self._params_test(samples, channels) if data is None else data
         if data.shape[0] % frame:
             new_shape = data.shape[0] // frame
             data = np.copy(data[:new_shape * frame, :])
@@ -130,7 +139,7 @@ therefore data samples will be clipped to {2}.
             to_res.append(a.reshape(-1, 1))
         return np.concatenate(to_res, axis=1)
 
-    def fft(self, frame, eliminate_freq, samples=None, channels=None, **kwargs):
+    def fft(self, frame, eliminate_freq, data=None, samples=None, channels=None, **kwargs):
         """
 Function performs filtering in frequency domain. The idea is that:
 1) Fourie transform apply to signal (Fast Fourie Transform from numpy library)
@@ -145,7 +154,7 @@ positive numbers from zero to max frequency = data sampling rate / 2)
 with chosen channels or int with specific channel.
 For documentation on numpy functions use command 'fft_doc'.
         """
-        data = self._params_test(samples, channels)
+        data = self._params_test(samples, channels) if data is None else data
         if frame % 2:
             frame += 1
             self.log.warning("""
@@ -178,7 +187,7 @@ The amount of data samples to be filtered will be cropped to {2}]
             temp.append(filtered)
         return np.concatenate(temp)
 
-    def wiener(self, samples=None, channels=None, **kwargs):
+    def wiener(self, data=None, samples=None, channels=None, **kwargs):
         """
 Function performs Wiener filter algorithm to signal (realization from scipy.signal library).
 THIS IS NOT WIENER, but very coarse mock of real algorithm.
@@ -187,19 +196,19 @@ THIS IS NOT WIENER, but very coarse mock of real algorithm.
 with chosen channels or int with specific channel.
 For documentation on scipy wiener function use command 'wiener_doc'.
         """
-        data = self._params_test(samples, channels)
+        data = self._params_test(samples, channels) if data is None else data
         return scipy.signal.wiener(data)
 
-    def mav(self, kernel=3, samples=None, channels=None, **kwargs):
+    def mav(self, kernel=3, data=None, samples=None, channels=None, **kwargs):
         """
 Function performs Moving Average algorithm to signal (realization from scipy.signal.medfilt library).
 'kernel' - size of moving window; must be odd; default=3
         """
-        data = self._params_test(samples, channels)
+        data = self._params_test(samples, channels) if data is None else data
         core = [kernel, 1]
         return scipy.signal.medfilt(data, kernel_size=core)
 
-    def wavelet(self, level=1000, samples=None, channels=None, **kwargs):
+    def wavelet(self, data=None, level=1000, samples=None, channels=None, **kwargs):
         """
 Function applies wavelet decomposition to signal (based on PyWavelet library).
 'level' - level of decomposition which will be used for inverse transform.
@@ -210,7 +219,7 @@ should use command 'wavelet_doc' or check "https://pywavelets.readthedocs.io"
             wav_name = kwargs['wavelet']
         else:
             wav_name = 'db4'
-        data = self._params_test(samples, channels)
+        data = self._params_test(samples, channels) if data is None else data
         try:
             wav = pywt.Wavelet(wav_name)
         except Exception as msg:
@@ -226,6 +235,23 @@ will be used for inverse transform.
         dec_res = pywt.wavedec(data, wav, level=None, axis=0, **kwargs)
         return pywt.waverec(dec_res[:level + 1], wav, axis=0, **kwargs)
 
+    def pipeline(self, params, samples=None, channels=None):
+        """
+Function creates pipeline from different filters of Filter class.
+'params' is dictionary in form: {'filter': **kwargs}, where **kwargs is
+parameters for 'filter'. One should use OrderedDict type of dictionary because
+all filters apply to signal in cascade, and order is not guaranteed for
+standard python's dictionary (for Python<=3.5 at least)
+'samples' - number of samples for processing;
+'channels' - which channels you want to use in processing; it can be list
+with chosen channels or int with specific channel.
+        """
+        data = self._params_test(samples, channels)
+        for key, value in params.items():
+            value['data'] = data
+            data = self._exec_func(key, value)
+        return data
+
     def plot(self, signals):
         """
 Function for simplest plotting (based on matplotlib.pyplot library).
@@ -239,6 +265,9 @@ figure (column align).
         plt.show()
 
     def signal(self, samples=None, channels=None):
+        """
+Function return data slices, stored into class object.
+        """
         return self._params_test(samples, channels)
 
     @property
@@ -268,9 +297,3 @@ figure (column align).
         print("----------------------")
         print("Inverse transform:")
         print(pywt.waverec.__doc__)
-
-if __name__ == '__main__':
-    a = Filter('neupy_raw.csv', 250, 150, 8)
-    sig = a.signal((10, 200), [5, 3])
-    med = a.wiener(samples=(10, 200), channels=[5, 3])
-    a.plot([sig, med])
