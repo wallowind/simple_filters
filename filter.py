@@ -179,6 +179,34 @@ Function performs Moving Average algorithm to signal (realization from scipy.sig
         core = [kernel, 1]
         return scipy.signal.medfilt(data, kernel_size=core)
 
+    def wavelet(self, level=1000, samples=None, channels=None, **kwargs):
+        """
+Function applies wavelet decomposition to signal (based on PyWavelet library).
+'level' - level of decomposition which will be used for inverse transform.
+For comprehensive documentation (there are plenty significant parameters) one
+should use command 'wavelet_doc' or check "https://pywavelets.readthedocs.io"
+        """
+        if 'wavelet' in kwargs.keys():
+            wav_name = kwargs['wavelet']
+        else:
+            wav_name = 'db4'
+        data = self._params_test(samples, channels)
+        try:
+            wav = pywt.Wavelet(wav_name)
+        except Exception as msg:
+            self.log.error(msg)
+            sys.exit(2)
+        max_level = pywt.dwt_max_level(data.shape[0], wav)
+        if level > max_level:
+            self.log.warning("""
+The maximum level of decomposition for chosen wavelet is {0} and it
+will be used for inverse transform.
+                            """.format(max_level))
+            level = max_level
+        dec_res = pywt.wavedec(data, wav, level=None, axis=0, **kwargs)
+        return pywt.waverec(dec_res[:level+1], wav, axis=0, **kwargs)
+
+
     def plot(self, signals):
         """
 Function for simplest plotting (based on matplotlib.pyplot library).
@@ -214,9 +242,16 @@ figure (column align).
     def wiener_doc(self):
         print(scipy.signal.wiener.__doc__)
 
+    @property
+    def wavelet_doc(self):
+        print("Wavelet decomposition:")
+        print(pywt.wavedec.__doc__)
+        print("----------------------")
+        print("Inverse transform:")
+        print(pywt.waverec.__doc__)
 
 if __name__ == '__main__':
     a = Filter('neupy_raw.csv', 250, 150, 8)
     sig = a.signal((10, 200), [5, 3])
-    med = a.mav(samples=(10, 200), channels=[5, 3])
+    med = a.wavelet(level=2, samples=(10, 200), channels=[5, 3])
     a.plot([sig, med])
