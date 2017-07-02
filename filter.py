@@ -48,14 +48,6 @@ Parameter 'log_level' sets level for logging function.
         self.log.warning("Data was reshaped to {0}".format(self.data.shape))
         self.rate = sampling_rate
 
-    def _ica(self, data, **kwargs):
-        model = FastICA(**kwargs)
-        return model.fit_transform(np.copy(data))
-
-    def _pca(self, data, **kwargs):
-        model = PCA(**kwargs)
-        return model.fit_transform(np.copy(data))
-
     def _params_test(self, samples, channels):
         if samples:
             if hasattr(samples, '__len__') and len(samples) == 2:
@@ -87,7 +79,7 @@ Parameter 'log_level' sets level for logging function.
             temp = temp.reshape(-1, 1)
         return temp
 
-    def ica(self, samples=None, channels=None, **kwargs):
+    def ica(self, frame=10, samples=None, channels=None, **kwargs):
         """
 Function performs 'Independent Component Analysis' decomposition. It based on
 FastICA algorithm of 'scikit-learn' library. Use command 'ica_doc' for documentation.
@@ -95,17 +87,48 @@ FastICA algorithm of 'scikit-learn' library. Use command 'ica_doc' for documenta
 'channels' - which channels you want to use in processing; it can be list
 with chosen channels or int with specific channel.
         """
-        return self._ica(self._params_test(samples, channels), **kwargs)
+        model = FastICA(n_components=frame, **kwargs)
+        data = self._params_test(samples, channels)
+        if data.shape[0] % frame:
+            new_shape = data.shape[0] // frame
+            data = np.copy(data[:new_shape * frame, :])
+            self.log.warning("""
+Length of sample length [{0}] not coincident with overall samples [{1}] and
+therefore data samples will be clipped to {2}.
+                            """.format(frame, data.shape[0], new_shape * frame))
+        to_res = []
+        for j in range(data.shape[1]):
+            temp = np.copy(data[:, j])
+            temp = temp.reshape(-1, frame)
+            a = model.fit_transform(temp)
+            to_res.append(a.reshape(-1, 1))
+        return np.concatenate(to_res, axis=1)
 
-    def pca(self, samples=None, channels=None, **kwargs):
+    def pca(self, frame=10, samples=None, channels=None, **kwargs):
         """
 Function performs 'Principal Component Analysis' decomposition. It based on
 PCA algorithm of 'scikit-learn' library. Use command 'pca_doc' for documentation.
+'frame' - sample length.
 'samples' - number of samples for processing;
 'channels' - which channels you want to use in processing; it can be list
 with chosen channels or int with specific channel.
         """
-        return self._pca(self._params_test(samples, channels), **kwargs)
+        model = PCA(n_components=frame, **kwargs)
+        data = self._params_test(samples, channels)
+        if data.shape[0] % frame:
+            new_shape = data.shape[0] // frame
+            data = np.copy(data[:new_shape * frame, :])
+            self.log.warning("""
+Length of sample length [{0}] not coincident with overall samples [{1}] and
+therefore data samples will be clipped to {2}.
+                            """.format(frame, data.shape[0], new_shape * frame))
+        to_res = []
+        for j in range(data.shape[1]):
+            temp = np.copy(data[:, j])
+            temp = temp.reshape(-1, frame)
+            a = model.fit_transform(temp)
+            to_res.append(a.reshape(-1, 1))
+        return np.concatenate(to_res, axis=1)
 
     def fft(self, frame, eliminate_freq, samples=None, channels=None, **kwargs):
         """
@@ -155,20 +178,17 @@ The amount of data samples to be filtered will be cropped to {2}]
             temp.append(filtered)
         return np.concatenate(temp)
 
-    def wiener(self, filt_size, noise=None, samples=None, channels=None, **kwargs):
+    def wiener(self, samples=None, channels=None, **kwargs):
         """
 Function performs Wiener filter algorithm to signal (realization from scipy.signal library).
-'filt_size' - length of filter windows.
-'noise' - noise source to be extracted from signal. If not set, then variance
-of the signal will be used as noise source.
+THIS IS NOT WIENER, but very coarse mock of real algorithm.
 'samples' - number of samples for processing;
 'channels' - which channels you want to use in processing; it can be list
 with chosen channels or int with specific channel.
 For documentation on scipy wiener function use command 'wiener_doc'.
         """
         data = self._params_test(samples, channels)
-        core = [filt_size for _ in range(data.shape[1])]
-        return scipy.signal.wiener(data, mysize=None, noise=noise)
+        return scipy.signal.wiener(data)
 
     def mav(self, kernel=3, samples=None, channels=None, **kwargs):
         """
@@ -204,8 +224,7 @@ will be used for inverse transform.
                             """.format(max_level))
             level = max_level
         dec_res = pywt.wavedec(data, wav, level=None, axis=0, **kwargs)
-        return pywt.waverec(dec_res[:level+1], wav, axis=0, **kwargs)
-
+        return pywt.waverec(dec_res[:level + 1], wav, axis=0, **kwargs)
 
     def plot(self, signals):
         """
@@ -253,5 +272,5 @@ figure (column align).
 if __name__ == '__main__':
     a = Filter('neupy_raw.csv', 250, 150, 8)
     sig = a.signal((10, 200), [5, 3])
-    med = a.wavelet(level=2, samples=(10, 200), channels=[5, 3])
+    med = a.wiener(samples=(10, 200), channels=[5, 3])
     a.plot([sig, med])
