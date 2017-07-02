@@ -15,10 +15,11 @@ samples of data, delimited by ','; if sample is multichannel one also must
 point out length of a segment, which representing one channel; if strings
 contain additional information one must set parameter 'additional_info' with
 number of columns with this info (it must be in the end of line).
+'sampling_rate' is signal acquisition frequency.
 Parameter 'log_level' sets level for logging function.
     """
 
-    def __init__(self, data_source, segmentation_length=None,
+    def __init__(self, data_source, sampling_rate, segmentation_length=None,
                  additional_info=None, log_level='WARNING'):
         self.log = get_log(__name__, log_level)
         try:
@@ -44,6 +45,7 @@ Parameter 'log_level' sets level for logging function.
             for i in range(temp.shape[0]):
                 self.data[i * temp.shape[1]:(i + 1) * temp.shape[1]] = temp[i]
         self.log.warning("Data was reshaped to {0}".format(self.data.shape))
+        self.rate = sampling_rate
 
     def _ica(self, data, **kwargs):
         model = FastICA(**kwargs)
@@ -55,13 +57,21 @@ Parameter 'log_level' sets level for logging function.
 
     def _params_test(self, samples, channels):
         if samples:
-            try:
-                temp = np.copy(self.data[:samples, :])
-            except Exception as msg:
-                self.log.error(msg)
-                sys.exit(2)
+            if hasattr(samples, '__len__') and len(samples) == 2:
+                try:
+                    temp = np.copy(self.data[samples[0]:samples[1], :])
+                except Exception as msg:
+                    self.log.error(msg)
+                    sys.exit(2)
+            else:
+                try:
+                    temp = np.copy(self.data[:samples, :])
+                except Exception as msg:
+                    self.log.error(msg)
+                    sys.exit(2)
         else:
             temp = np.copy(self.data)
+            self.log.info("All samples will be used in processing.")
         if channels:
             try:
                 temp = temp[:, channels]
@@ -81,7 +91,7 @@ Parameter 'log_level' sets level for logging function.
 Function performs 'Independent Component Analysis' decomposition. It based on
 FastICA algorithm of 'scikit-learn' library. Use command 'ica_doc' for documentation.
 'samples' - number of samples for processing;
-'channels' - which channels you want to use in processing; it can be list or tuple
+'channels' - which channels you want to use in processing; it can be list
 with chosen channels or int with specific channel.
         """
         return self._ica(self._params_test(samples, channels), **kwargs)
@@ -91,10 +101,58 @@ with chosen channels or int with specific channel.
 Function performs 'Principal Component Analysis' decomposition. It based on
 PCA algorithm of 'scikit-learn' library. Use command 'pca_doc' for documentation.
 'samples' - number of samples for processing;
-'channels' - which channels you want to use in processing; it can be list or tuple
+'channels' - which channels you want to use in processing; it can be list
 with chosen channels or int with specific channel.
         """
         return self._pca(self._params_test(samples, channels), **kwargs)
+
+    def fft(self, frame, eliminate_freq, samples=None, channels=None, **kwargs):
+        """
+Function performs filtering in frequency domain. The idea is that:
+1) Fourie transform apply to signal (Fast Fourie Transform from numpy library)
+2) It convolves with the filter core and selected frequencies is eliminated
+3) Inverse Fourie transform of convolution and restoring filtered signal
+'frame' - selected length of sliding window (longer gives better frequency
+resolution, but poorer time resolution and vice verse);
+'eliminate_freq' - list with frequencies to eliminate (must contains only
+positive numbers from zero to max frequency = data sampling rate / 2)
+'samples' - number of samples for processing;
+'channels' - which channels you want to use in processing; it can be list
+with chosen channels or int with specific channel.
+For documentation on numpy functions use command 'fft_doc'.
+        """
+        data = self._params_test(samples, channels)
+        if frame % 2:
+            frame += 1
+            self.log.warning("""
+Length of sliding window increased by 1 and it is {0} now. For certain reason.
+                            """.format(frame))
+        parts = data.shape[0] // frame
+        if data.shape[0] % frame:
+            self.log.warning("""
+Length of sliding window {0} not coincident with amount of samples {1}.
+The amount of data samples to be filtered will be cropped to {2}]
+                            """.format(frame, data.shape[0], parts * frame))
+        freq = self.rate / (frame / 2 + 1)  # Frequency bin
+        self.log.warning(
+            "For given length of sliding window the frequency resolution is {0:.1f} Hz.".format(freq))
+        possible_freq = [freq * i for i in range(frame // 2 + 1)]
+        core = [1 for _ in range(frame // 2 + 1)]
+        for f in eliminate_freq:
+            eliminate = min(possible_freq, key=lambda x: abs(x - f))
+            idx = possible_freq.index(eliminate)
+            core[idx] = 0
+            self.log.info(
+                "For frequency {0} Hz will be deleted closest frequency: {1:.1f} Hz".format(f, (idx) * freq))
+        core = np.array(core).reshape(-1, 1)
+        temp = []
+        for i in range(parts):
+            image = np.fft.rfft(
+                data[i * frame:(i + 1) * frame, :], n=frame, axis=0)
+            convolution = np.multiply(image, core)
+            filtered = np.fft.irfft(convolution, n=frame, axis=0)
+            temp.append(filtered)
+        return np.concatenate(temp)
 
     @property
     def ica_doc(self):
@@ -104,6 +162,15 @@ with chosen channels or int with specific channel.
     def pca_doc(self):
         print(PCA.__doc__)
 
+    @property
+    def fft_doc(self):
+        print("Forward Fourie transform:")
+        print(np.fft.rfft.__doc__)
+        print("-------------------------")
+        print("Inverse Fourie transform:")
+        print(np.fft.irfft.__doc__)
+
 
 if __name__ == '__main__':
-    a = Filter('neupy_raw.csv', 150, 8)
+    a = Filter('neupy_raw.csv', 250, 150, 8)
+    a.fft(50, [i for i in range(100)], samples=50, channels=[2])
