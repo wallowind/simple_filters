@@ -1,4 +1,5 @@
 import numpy as np
+import scipy.signal
 import pywt
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
@@ -154,6 +155,45 @@ The amount of data samples to be filtered will be cropped to {2}]
             temp.append(filtered)
         return np.concatenate(temp)
 
+    def wiener(self, filt_size, noise=None, samples=None, channels=None, **kwargs):
+        """
+Function performs Wiener filter algorithm to signal (realization from scipy.signal library).
+'filt_size' - length of filter windows.
+'noise' - noise source to be extracted from signal. If not set, then variance
+of the signal will be used as noise source.
+'samples' - number of samples for processing;
+'channels' - which channels you want to use in processing; it can be list
+with chosen channels or int with specific channel.
+For documentation on scipy wiener function use command 'wiener_doc'.
+        """
+        data = self._params_test(samples, channels)
+        core = [filt_size for _ in range(data.shape[1])]
+        return scipy.signal.wiener(data, mysize=None, noise=noise)
+
+    def mav(self, kernel=3, samples=None, channels=None, **kwargs):
+        """
+Function performs Moving Average algorithm to signal (realization from scipy.signal.medfilt library).
+'kernel' - size of moving window; must be odd; default=3
+        """
+        data = self._params_test(samples, channels)
+        core = [kernel, 1]
+        return scipy.signal.medfilt(data, kernel_size=core)
+
+    def plot(self, signals):
+        """
+Function for simplest plotting (based on matplotlib.pyplot library).
+'signals' - list with signals to plot. Every signal will be plotted on one
+figure (column align).
+        """
+        fig = plt.figure()
+        for i in range(len(signals)):
+            ax = fig.add_subplot(len(signals), 1, i + 1)
+            ax.plot(signals[i])
+        plt.show()
+
+    def signal(self, samples=None, channels=None):
+        return self._params_test(samples, channels)
+
     @property
     def ica_doc(self):
         print(FastICA.__doc__)
@@ -170,7 +210,13 @@ The amount of data samples to be filtered will be cropped to {2}]
         print("Inverse Fourie transform:")
         print(np.fft.irfft.__doc__)
 
+    @property
+    def wiener_doc(self):
+        print(scipy.signal.wiener.__doc__)
+
 
 if __name__ == '__main__':
     a = Filter('neupy_raw.csv', 250, 150, 8)
-    a.fft(50, [i for i in range(100)], samples=50, channels=[2])
+    sig = a.signal((10, 200), [5, 3])
+    med = a.mav(samples=(10, 200), channels=[5, 3])
+    a.plot([sig, med])
